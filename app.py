@@ -3,19 +3,29 @@ import pandas as pd
 from openpyxl import load_workbook
 import tempfile
 import os
+import re
 
 st.set_page_config(page_title="Employee Report", layout="centered")
 st.title("📊 Employee Performance Report")
 
 # -----------------------
-# MAKE COLUMN NAMES UNIQUE
+# CLEAN COLUMN NAMES
+# -----------------------
+def clean_column(col):
+    col = str(col)
+    col = col.replace("\n", " ").replace("\r", " ").replace("\xa0", " ")
+    col = re.sub(r"\s+", " ", col)
+    return col.strip()
+
+# -----------------------
+# MAKE UNIQUE COLUMNS
 # -----------------------
 def make_unique_columns(columns):
     seen = {}
     new_cols = []
 
     for col in columns:
-        col = str(col).strip()
+        col = clean_column(col)
 
         if col in seen:
             seen[col] += 1
@@ -26,16 +36,18 @@ def make_unique_columns(columns):
 
     return new_cols
 
-
 # -----------------------
-# SAFE COLUMN FETCH
+# SAFE VALUE FETCH
 # -----------------------
 def safe_get(row, col):
-    for c in row.index:
-        if str(c).strip() == col:
-            return row[c]
-    return ""
+    col = clean_column(col)
 
+    for c in row.index:
+        cleaned = clean_column(c)
+        if cleaned == col:
+            return row[c]
+
+    return ""
 
 # -----------------------
 # AUTO HEADER DETECTION
@@ -47,28 +59,32 @@ def load_data_auto_header(file):
     header_row = None
 
     for i, row in df_raw.iterrows():
-        row_values = row.astype(str).str.strip().tolist()
+        row_values = [clean_column(x) for x in row.tolist()]
 
         if "Month" in row_values:
             header_row = i
             break
 
     if header_row is None:
-        st.error("Header row not found")
+        st.error("Header row with 'Month' not found")
         st.stop()
 
     df = pd.read_excel(file, header=header_row)
 
-    # CLEAN COLUMNS
-    df.columns = df.columns.astype(str).str.strip().str.replace(r"\s+", " ", regex=True)
+    # Clean column names
     df.columns = make_unique_columns(df.columns)
 
-    # CLEAN DATA
+    # Clean values
+    for col in df.columns:
+        df[col] = df[col].astype(str)
+        df[col] = df[col].str.replace("\xa0", " ")
+        df[col] = df[col].str.replace("\n", " ")
+        df[col] = df[col].str.strip()
+
+    # Remove empty rows
     df = df.dropna(how="all")
-    df = df.fillna("")
 
     return df
-
 
 # -----------------------
 # LOAD DATA
@@ -80,7 +96,8 @@ def load_data():
 df = load_data()
 
 # DEBUG (uncomment if needed)
-# st.write(df.columns.tolist())
+# st.write("COLUMNS:", df.columns.tolist())
+# st.write("MONTH VALUES:", df["Month"].unique())
 
 # -----------------------
 # INPUT
@@ -89,9 +106,8 @@ if "Employee Code" not in df.columns:
     st.error("Employee Code column not found")
     st.stop()
 
-emp_list = df["Employee Code"].astype(str).unique()
+emp_list = df["Employee Code"].unique()
 emp_id = st.selectbox("Select Employee Code", emp_list)
-
 
 # -----------------------
 # GENERATE REPORT
@@ -101,26 +117,28 @@ def generate_report(emp_id, filtered):
     wb = load_workbook("template.xlsx")
     ws = wb.active
 
-    # HEADER
     emp_details = filtered.iloc[0]
 
+    # HEADER
     ws["C3"] = emp_id
     ws["C4"] = safe_get(emp_details, "Engineer Name")
     ws["C5"] = safe_get(emp_details, "Team")
     ws["C6"] = safe_get(emp_details, "Designation")
     ws["C7"] = safe_get(emp_details, "Service Advisor")
 
-    # REMOVE EMPTY MONTHS
+    # CLEAN MONTH
+    filtered["Month"] = filtered["Month"].astype(str)
+    filtered["Month"] = filtered["Month"].apply(clean_column)
+
+    # REMOVE INVALID ROWS
     filtered = filtered[filtered["Month"] != ""]
-    filtered = filtered.dropna(subset=["Month"])
+    filtered = filtered[filtered["Month"].notna()]
 
     # REMOVE DUPLICATES
     filtered = filtered.drop_duplicates(subset=["Month"], keep="first")
 
     # SORT MONTH
     month_order = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-
-    filtered["Month"] = filtered["Month"].astype(str).str.strip()
     filtered["Month"] = pd.Categorical(filtered["Month"], categories=month_order, ordered=True)
     filtered = filtered.sort_values("Month")
 
@@ -156,9 +174,9 @@ def generate_report(emp_id, filtered):
         start_row += 1
 
     # KPI CALCULATION
-    site = filtered.get("Achieved", pd.Series()).sum()
-    efsr = filtered.get("Achieved_1", pd.Series()).sum()
-    prod = filtered.get("Achieved_2", pd.Series()).sum()
+    site = filtered.get("Achieved", pd.Series(dtype=float)).replace("", 0).astype(float).sum()
+    efsr = filtered.get("Achieved_1", pd.Series(dtype=float)).replace("", 0).astype(float).sum()
+    prod = filtered.get("Achieved_2", pd.Series(dtype=float)).replace("", 0).astype(float).sum()
 
     overall = round(site + efsr + prod, 2)
 
@@ -170,13 +188,12 @@ def generate_report(emp_id, filtered):
 
     return file_path
 
-
 # -----------------------
 # BUTTON
 # -----------------------
 if st.button("Generate Report"):
 
-    filtered = df[df["Employee Code"].astype(str) == str(emp_id)]
+    filtered = df[df["Employee Code"] == emp_id]
 
     if filtered.empty:
         st.error("No data found")
