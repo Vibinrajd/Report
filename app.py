@@ -1,33 +1,73 @@
-from flask import Flask, render_template, request, send_file
+import streamlit as st
 import pandas as pd
-import os
 import tempfile
+import os
+from reportlab.platypus import SimpleDocTemplate, Table
 
-app = Flask(__name__)
+# ---------- CONFIG ----------
+st.set_page_config(page_title="Employee Report", layout="wide")
 
-df = pd.read_excel("master_data.xlsx")
+st.title("📊 Employee Report Generator")
 
-@app.route("/", methods=["GET", "POST"])
-def index():
-    if request.method == "POST":
-        emp_id = request.form.get("emp_id")
+# ---------- LOAD DATA ----------
+@st.cache_data
+def load_data():
+    return pd.read_excel("master_data.xlsx")
 
-        if not emp_id:
-            return "Invalid input"
+df = load_data()
 
-        filtered = df[df["Employee Code"] == emp_id]
+# ---------- INPUT ----------
+emp_list = df["Employee Code"].dropna().unique()
+emp_id = st.selectbox("Select Employee Code", emp_list)
 
-        if filtered.empty:
-            return "No data found"
+# ---------- FILTER ----------
+filtered = df[df["Employee Code"] == emp_id]
 
-        # TEMP FILE (important for cloud)
-        file_path = os.path.join(tempfile.gettempdir(), f"{emp_id}.xlsx")
-        filtered.to_excel(file_path, index=False)
+if not filtered.empty:
 
-        return send_file(file_path, as_attachment=True)
+    st.subheader("📋 Report Preview")
+    st.dataframe(filtered, use_container_width=True)
 
-    return render_template("index.html")
+    # ---------- METRICS ----------
+    col1, col2, col3 = st.columns(3)
 
+    col1.metric("Total SON", int(filtered["Total SON"].sum()))
+    col2.metric("Total E-FSR", int(filtered["EFsr"].sum()))
+    col3.metric("Total E-Lead", int(filtered["ELead"].sum()))
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    # ---------- EXCEL EXPORT ----------
+    def generate_excel(data):
+        path = os.path.join(tempfile.gettempdir(), f"{emp_id}_report.xlsx")
+        data.to_excel(path, index=False)
+        return path
+
+    excel_path = generate_excel(filtered)
+
+    with open(excel_path, "rb") as f:
+        st.download_button(
+            label="⬇️ Download Excel",
+            data=f,
+            file_name=f"{emp_id}_report.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    # ---------- PDF EXPORT ----------
+    def generate_pdf(data):
+        path = os.path.join(tempfile.gettempdir(), f"{emp_id}_report.pdf")
+        pdf = SimpleDocTemplate(path)
+        table = Table([data.columns.tolist()] + data.values.tolist())
+        pdf.build([table])
+        return path
+
+    pdf_path = generate_pdf(filtered)
+
+    with open(pdf_path, "rb") as f:
+        st.download_button(
+            label="⬇️ Download PDF",
+            data=f,
+            file_name=f"{emp_id}_report.pdf",
+            mime="application/pdf"
+        )
+
+else:
+    st.warning("No data found for selected employee.")
