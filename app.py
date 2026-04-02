@@ -1,213 +1,68 @@
 import streamlit as st
 import pandas as pd
-from openpyxl import load_workbook
-import tempfile
-import os
-import re
 
-st.set_page_config(page_title="Employee Report", layout="centered")
-st.title("📊 Employee Performance Report")
+st.set_page_config(page_title="KRA Tracker", layout="wide")
 
-# -----------------------
-# CLEAN TEXT
-# -----------------------
-def clean_text(x):
-    x = str(x)
-    x = x.replace("\xa0", " ").replace("\n", " ").replace("\r", " ")
-    x = re.sub(r"\s+", " ", x)
-    return x.strip()
+st.title("📊 Engineer KRA Tracker")
 
-# -----------------------
-# CLEAN + UNIQUE COLUMNS
-# -----------------------
-def clean_columns(cols):
-    cols = [clean_text(c) for c in cols]
+# ---------------------------
+# FILE UPLOADS
+# ---------------------------
+st.sidebar.header("Upload Files")
 
-    seen = {}
-    new_cols = []
+total_son_file = st.sidebar.file_uploader("Total SON", type=["xlsx"])
+efsr_file = st.sidebar.file_uploader("EFSR", type=["xlsx"])
+fsl_file = st.sidebar.file_uploader("FSL", type=["xlsx"])
+attendance_file = st.sidebar.file_uploader("Attendance", type=["xlsx"])
+site10_file = st.sidebar.file_uploader("10AM", type=["xlsx"])
 
-    for c in cols:
-        if c in seen:
-            seen[c] += 1
-            new_cols.append(f"{c}_{seen[c]}")
-        else:
-            seen[c] = 0
-            new_cols.append(c)
+# ---------------------------
+# PROCESS DATA
+# ---------------------------
+if total_son_file and efsr_file:
 
-    return new_cols
+    total_df = pd.read_excel(total_son_file)
+    efsr_df = pd.read_excel(efsr_file)
 
-# -----------------------
-# SAFE GET
-# -----------------------
-def safe_get(row, col):
-    col = clean_text(col)
+    # Normalize column names
+    total_df.columns = total_df.columns.str.strip()
+    efsr_df.columns = efsr_df.columns.str.strip()
 
-    for c in row.index:
-        if clean_text(c) == col:
-            return row[c]
-    return ""
+    # Assume column name = 'SON'
+    total_df["SON"] = total_df["SON"].astype(str).str.strip()
+    efsr_df["SON"] = efsr_df["SON"].astype(str).str.strip()
 
-# -----------------------
-# SAFE SUM (FIXED ERROR)
-# -----------------------
-def safe_sum(df, col):
-    if col in df.columns:
-        return pd.to_numeric(df[col], errors="coerce").fillna(0).sum()
-    return 0
+    # ---------------------------
+    # EFSR JOIN (CORE LOGIC)
+    # ---------------------------
+    efsr_count = efsr_df.groupby("SON").size().reset_index(name="EFSR")
 
-# -----------------------
-# AUTO HEADER DETECTION
-# -----------------------
-def load_data(file):
+    merged_df = total_df.merge(efsr_count, on="SON", how="left")
+    merged_df["EFSR"] = merged_df["EFSR"].fillna(0)
 
-    raw = pd.read_excel(file, header=None)
+    # ---------------------------
+    # KPI CALCULATION
+    # ---------------------------
+    summary = merged_df.groupby("Engineer").agg({
+        "SON": "count",
+        "EFSR": "sum"
+    }).reset_index()
 
-    header_row = None
-    for i, row in raw.iterrows():
-        values = [clean_text(v) for v in row.tolist()]
-        if "Month" in values:
-            header_row = i
-            break
+    summary.rename(columns={"SON": "Total SON"}, inplace=True)
 
-    if header_row is None:
-        st.error("Header row not found")
-        st.stop()
+    summary["EFSR %"] = (summary["EFSR"] / summary["Total SON"]) * 100
 
-    df = pd.read_excel(file, header=header_row)
+    # ---------------------------
+    # DISPLAY
+    # ---------------------------
+    st.subheader("📋 KRA Summary")
+    st.dataframe(summary, use_container_width=True)
 
-    df.columns = clean_columns(df.columns)
+    # ---------------------------
+    # DOWNLOAD
+    # ---------------------------
+    csv = summary.to_csv(index=False).encode("utf-8")
+    st.download_button("Download Report", csv, "kra_report.csv", "text/csv")
 
-    # CLEAN VALUES
-    for col in df.columns:
-        df[col] = df[col].apply(clean_text)
-
-    # REMOVE EMPTY ROWS
-    df = df.replace("", pd.NA).dropna(how="all").fillna("")
-
-    return df
-
-# -----------------------
-# LOAD DATA
-# -----------------------
-@st.cache_data
-def get_data():
-    return load_data("master_data.xlsx")
-
-df = get_data()
-
-# -----------------------
-# VALIDATION
-# -----------------------
-if "Employee Code" not in df.columns:
-    st.error("Employee Code column missing")
-    st.stop()
-
-emp_id = st.selectbox("Select Employee Code", df["Employee Code"].unique())
-
-# -----------------------
-# GENERATE REPORT
-# -----------------------
-def generate_report(emp_id, df):
-
-    data = df[df["Employee Code"] == emp_id].copy()
-
-    # KEEP ONLY VALID ROWS (REMOVE TEMPLATE ROWS)
-    data = data[
-        (data.get("Total SON", "") != "") |
-        (data.get("E-FSR", "") != "") |
-        (data.get("E-LEAD", "") != "")
-    ]
-
-    # CLEAN MONTH
-    data["Month"] = data["Month"].apply(clean_text)
-    data = data[data["Month"] != ""]
-
-    # REMOVE DUPLICATE MONTHS
-    data = data.drop_duplicates(subset=["Month"], keep="last")
-
-    # SORT MONTH
-    order = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-    data["Month"] = pd.Categorical(data["Month"], categories=order, ordered=True)
-    data = data.sort_values("Month")
-
-    if data.empty:
-        return None
-
-    wb = load_workbook("template.xlsx")
-    ws = wb.active
-
-    # HEADER DETAILS (LAST VALID ROW)
-    emp_details = data.iloc[-1]
-
-    ws["C3"] = emp_id
-    ws["C4"] = safe_get(emp_details, "Engineer Name")
-    ws["C5"] = safe_get(emp_details, "Team")
-    ws["C6"] = safe_get(emp_details, "Designation")
-    ws["C7"] = safe_get(emp_details, "Service Advisor")
-
-    # WRITE DATA
-    start_row = 11
-
-    for _, r in data.iterrows():
-
-        # EXTRA SAFETY SKIP
-        if safe_get(r, "Total SON") == "" and safe_get(r, "E-FSR") == "":
-            continue
-
-        ws[f"B{start_row}"] = safe_get(r, "Month")
-        ws[f"C{start_row}"] = safe_get(r, "Total SON")
-        ws[f"D{start_row}"] = safe_get(r, "SITE @ 10AM")
-        ws[f"E{start_row}"] = safe_get(r, "SITE @10AM %")
-        ws[f"F{start_row}"] = safe_get(r, "Rating Site@10AM")
-
-        ws[f"H{start_row}"] = safe_get(r, "E-FSR")
-        ws[f"I{start_row}"] = safe_get(r, "E-FSR %")
-        ws[f"J{start_row}"] = safe_get(r, "Rating Efsr %")
-
-        ws[f"L{start_row}"] = safe_get(r, "E-LEAD")
-        ws[f"M{start_row}"] = safe_get(r, "E-LEAD %")
-
-        ws[f"N{start_row}"] = safe_get(r, "Productivity based on SONs")
-        ws[f"O{start_row}"] = safe_get(r, "Rating Productivity")
-
-        ws[f"Q{start_row}"] = safe_get(r, "Final Rating")
-        ws[f"R{start_row}"] = safe_get(r, "KEKA Attendance")
-
-        # DUPLICATE ACHIEVED HANDLING
-        ws[f"G{start_row}"] = safe_get(r, "Achieved")
-        ws[f"K{start_row}"] = safe_get(r, "Achieved_1")
-        ws[f"P{start_row}"] = safe_get(r, "Achieved_2")
-
-        start_row += 1
-
-    # KPI CALCULATION (FIXED)
-    site = safe_sum(data, "Achieved")
-    efsr = safe_sum(data, "Achieved_1")
-    prod = safe_sum(data, "Achieved_2")
-
-    ws["P5"] = round(site + efsr + prod, 2)
-
-    # SAVE FILE
-    path = os.path.join(tempfile.gettempdir(), f"{emp_id}_report.xlsx")
-    wb.save(path)
-
-    return path
-
-# -----------------------
-# BUTTON
-# -----------------------
-if st.button("Generate Report"):
-
-    file_path = generate_report(emp_id, df)
-
-    if not file_path:
-        st.error("No valid data found")
-    else:
-        st.success("Report Ready")
-
-        with open(file_path, "rb") as f:
-            st.download_button(
-                "📥 Download Report",
-                f,
-                file_name=f"{emp_id}_report.xlsx"
-            )
+else:
+    st.info("Upload at least Total SON and EFSR files")
