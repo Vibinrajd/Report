@@ -1,5 +1,10 @@
 import streamlit as st
 import pandas as pd
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
+import tempfile
 
 st.set_page_config(page_title="KRA Tracker", layout="wide")
 st.title("📊 Engineer KRA Tracker")
@@ -16,14 +21,60 @@ fsl_file = st.sidebar.file_uploader("FSL (E-Lead)", type=["xlsx"])
 attendance_file = st.sidebar.file_uploader("Attendance", type=["xlsx"])
 
 # ---------------------------
-# CLEAN FUNCTION
+# CLEAN
 # ---------------------------
 def clean_df(df):
     df.columns = df.columns.str.strip()
     return df
 
 # ---------------------------
-# MAIN FLOW
+# PDF GENERATOR
+# ---------------------------
+def generate_pdf(engineer, emp_code, df):
+
+    file_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
+    doc = SimpleDocTemplate(file_path, pagesize=letter)
+    styles = getSampleStyleSheet()
+
+    elements = []
+
+    # HEADER
+    elements.append(Paragraph(f"<b>Employee Code:</b> {emp_code}", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Engineer Name:</b> {engineer}", styles["Normal"]))
+    elements.append(Paragraph("<b>Monthly KRA Report</b>", styles["Title"]))
+    elements.append(Spacer(1, 10))
+
+    # KPI WEIGHTS
+    elements.append(Paragraph("KPI Weights:", styles["Heading3"]))
+    elements.append(Paragraph("Site@10AM: 30% | E-Lead: 40% | Productivity: 30%", styles["Normal"]))
+    elements.append(Spacer(1, 10))
+
+    # TABLE
+    data = [df.columns.tolist()] + df.values.tolist()
+
+    table = Table(data, repeatRows=1)
+
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.grey),
+        ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+        ("GRID", (0,0), (-1,-1), 0.5, colors.black),
+        ("FONTSIZE", (0,0), (-1,-1), 8)
+    ]))
+
+    elements.append(table)
+    elements.append(Spacer(1, 20))
+
+    # FOOTER
+    elements.append(Paragraph("Employee Signature: ____________", styles["Normal"]))
+    elements.append(Paragraph("Manager Signature: ____________", styles["Normal"]))
+    elements.append(Paragraph("Remarks:", styles["Normal"]))
+
+    doc.build(elements)
+
+    return file_path
+
+# ---------------------------
+# MAIN LOGIC
 # ---------------------------
 if total_file and efsr_file:
 
@@ -34,47 +85,35 @@ if total_file and efsr_file:
 
     col1, col2 = st.columns(2)
 
-    # ---------------------------
-    # TOTAL FILE MAPPING
-    # ---------------------------
     with col1:
-        st.markdown("### Total SON File")
-
         total_son_col = st.selectbox("SON Column (Total)", total_df.columns)
         engineer_col = st.selectbox("Engineer Column", total_df.columns)
 
-    # ---------------------------
-    # EFSR FILE MAPPING
-    # ---------------------------
     with col2:
-        st.markdown("### EFSR File")
-
         efsr_son_col = st.selectbox("SON Column (EFSR)", efsr_df.columns)
 
-    # ---------------------------
-    # OPTIONAL FILES MAPPING
-    # ---------------------------
+    # Optional mappings
     if site10_file:
         site_df = clean_df(pd.read_excel(site10_file))
-        site_son_col = st.selectbox("SON Column (10AM File)", site_df.columns)
+        site_son_col = st.selectbox("SON Column (10AM)", site_df.columns)
     else:
         site_df = None
 
     if fsl_file:
         fsl_df = clean_df(pd.read_excel(fsl_file))
-        fsl_son_col = st.selectbox("SON Column (FSL File)", fsl_df.columns)
+        fsl_son_col = st.selectbox("SON Column (FSL)", fsl_df.columns)
     else:
         fsl_df = None
 
     if attendance_file:
         att_df = clean_df(pd.read_excel(attendance_file))
-        att_emp_col = st.selectbox("Employee Column (Attendance)", att_df.columns)
+        att_emp_col = st.selectbox("Attendance Employee Column", att_df.columns)
         att_days_col = st.selectbox("Attendance Days Column", att_df.columns)
     else:
         att_df = None
 
     # ---------------------------
-    # PROCESS BUTTON
+    # PROCESS
     # ---------------------------
     if st.button("🚀 Generate Report"):
 
@@ -82,14 +121,8 @@ if total_file and efsr_file:
         total_df[total_son_col] = total_df[total_son_col].astype(str).str.strip()
         efsr_df[efsr_son_col] = efsr_df[efsr_son_col].astype(str).str.strip()
 
-        # ---------------------------
-        # EFSR JOIN
-        # ---------------------------
-        efsr_count = (
-            efsr_df.groupby(efsr_son_col)
-            .size()
-            .reset_index(name="EFSR")
-        )
+        # EFSR
+        efsr_count = efsr_df.groupby(efsr_son_col).size().reset_index(name="EFSR")
 
         merged_df = total_df.merge(
             efsr_count,
@@ -100,17 +133,10 @@ if total_file and efsr_file:
 
         merged_df["EFSR"] = merged_df["EFSR"].fillna(0)
 
-        # ---------------------------
-        # 10AM JOIN
-        # ---------------------------
+        # 10AM
         if site_df is not None:
             site_df[site_son_col] = site_df[site_son_col].astype(str).str.strip()
-
-            site_count = (
-                site_df.groupby(site_son_col)
-                .size()
-                .reset_index(name="SITE_10AM")
-            )
+            site_count = site_df.groupby(site_son_col).size().reset_index(name="SITE_10AM")
 
             merged_df = merged_df.merge(
                 site_count,
@@ -118,22 +144,14 @@ if total_file and efsr_file:
                 right_on=site_son_col,
                 how="left"
             )
-
             merged_df["SITE_10AM"] = merged_df["SITE_10AM"].fillna(0)
         else:
             merged_df["SITE_10AM"] = 0
 
-        # ---------------------------
-        # FSL JOIN (E-LEAD)
-        # ---------------------------
+        # FSL
         if fsl_df is not None:
             fsl_df[fsl_son_col] = fsl_df[fsl_son_col].astype(str).str.strip()
-
-            fsl_count = (
-                fsl_df.groupby(fsl_son_col)
-                .size()
-                .reset_index(name="E_LEAD")
-            )
+            fsl_count = fsl_df.groupby(fsl_son_col).size().reset_index(name="E_LEAD")
 
             merged_df = merged_df.merge(
                 fsl_count,
@@ -141,14 +159,11 @@ if total_file and efsr_file:
                 right_on=fsl_son_col,
                 how="left"
             )
-
             merged_df["E_LEAD"] = merged_df["E_LEAD"].fillna(0)
         else:
             merged_df["E_LEAD"] = 0
 
-        # ---------------------------
-        # SUMMARY (ENGINEER LEVEL)
-        # ---------------------------
+        # SUMMARY
         summary = merged_df.groupby(engineer_col).agg({
             total_son_col: "count",
             "EFSR": "sum",
@@ -156,41 +171,14 @@ if total_file and efsr_file:
             "E_LEAD": "sum"
         }).reset_index()
 
-        summary.rename(columns={
-            total_son_col: "TOTAL SON"
-        }, inplace=True)
+        summary.rename(columns={total_son_col: "TOTAL SON"}, inplace=True)
 
-        # ---------------------------
-        # PERCENTAGES
-        # ---------------------------
+        # %
         summary["EFSR %"] = (summary["EFSR"] / summary["TOTAL SON"]) * 100
         summary["SITE 10AM %"] = (summary["SITE_10AM"] / summary["TOTAL SON"]) * 100
         summary["E-LEAD %"] = (summary["E_LEAD"] / summary["TOTAL SON"]) * 100
 
-        # ---------------------------
-        # ATTENDANCE JOIN
-        # ---------------------------
-        if att_df is not None:
-            att_df[att_emp_col] = att_df[att_emp_col].astype(str).str.strip()
-            summary[engineer_col] = summary[engineer_col].astype(str).str.strip()
-
-            summary = summary.merge(
-                att_df[[att_emp_col, att_days_col]],
-                left_on=engineer_col,
-                right_on=att_emp_col,
-                how="left"
-            )
-
-            summary.rename(columns={
-                att_days_col: "ATTENDANCE"
-            }, inplace=True)
-
-        else:
-            summary["ATTENDANCE"] = 0
-
-        # ---------------------------
-        # RATING LOGIC
-        # ---------------------------
+        # Ratings
         def rating(x):
             if x >= 90:
                 return 5
@@ -205,26 +193,57 @@ if total_file and efsr_file:
         summary["10AM Rating"] = summary["SITE 10AM %"].apply(rating)
         summary["E-LEAD Rating"] = summary["E-LEAD %"].apply(rating)
 
-        # ---------------------------
-        # FINAL SCORE (SIMPLE)
-        # ---------------------------
         summary["FINAL RATING"] = (
             summary["EFSR Rating"] +
             summary["10AM Rating"] +
             summary["E-LEAD Rating"]
         ) / 3
 
-        # ---------------------------
+        # Attendance
+        if att_df is not None:
+            att_df[att_emp_col] = att_df[att_emp_col].astype(str).str.strip()
+            summary[engineer_col] = summary[engineer_col].astype(str).str.strip()
+
+            summary = summary.merge(
+                att_df[[att_emp_col, att_days_col]],
+                left_on=engineer_col,
+                right_on=att_emp_col,
+                how="left"
+            )
+
+            summary.rename(columns={att_days_col: "ATTENDANCE"}, inplace=True)
+        else:
+            summary["ATTENDANCE"] = 0
+
         # DISPLAY
-        # ---------------------------
-        st.subheader("📋 Final KRA Report")
+        st.subheader("📋 Final Report")
         st.dataframe(summary, use_container_width=True)
 
-        # ---------------------------
-        # DOWNLOAD
-        # ---------------------------
+        # CSV
         csv = summary.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ Download Report", csv, "kra_report.csv")
+        st.download_button("⬇️ Download CSV", csv, "kra_report.csv")
+
+        # PDF
+        st.subheader("📄 Generate PDF")
+
+        selected_engineer = st.selectbox("Select Engineer", summary[engineer_col])
+
+        if st.button("Generate PDF"):
+
+            emp_df = summary[summary[engineer_col] == selected_engineer]
+
+            pdf_path = generate_pdf(
+                engineer=selected_engineer,
+                emp_code="AUTO",
+                df=emp_df
+            )
+
+            with open(pdf_path, "rb") as f:
+                st.download_button(
+                    "⬇️ Download PDF",
+                    f,
+                    file_name=f"{selected_engineer}_KRA.pdf"
+                )
 
 else:
-    st.info("Upload at least Total SON and EFSR files")
+    st.info("Upload Total SON and EFSR to start")
