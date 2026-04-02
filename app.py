@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
@@ -28,11 +27,11 @@ def clean_df(df):
     return df
 
 # ---------------------------
-# PDF FUNCTION
+# PDF GENERATOR
 # ---------------------------
 def generate_pdf(engineer, emp_code, df):
     file_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
-    doc = SimpleDocTemplate(file_path, pagesize=letter)
+    doc = SimpleDocTemplate(file_path)
     styles = getSampleStyleSheet()
 
     elements = []
@@ -42,7 +41,6 @@ def generate_pdf(engineer, emp_code, df):
     elements.append(Paragraph("<b>Monthly KRA Report</b>", styles["Title"]))
     elements.append(Spacer(1, 10))
 
-    elements.append(Paragraph("KPI Weights:", styles["Heading3"]))
     elements.append(Paragraph("Site@10AM: 30% | E-Lead: 40% | Productivity: 30%", styles["Normal"]))
     elements.append(Spacer(1, 10))
 
@@ -86,10 +84,11 @@ if total_file and efsr_file:
         efsr_son_col = st.selectbox("SON Column (EFSR)", efsr_df.columns)
         efsr_value_col = st.selectbox("EFSR Value Column", efsr_df.columns)
 
-    # Optional mappings
+    # Optional files
     if site10_file:
         site_df = clean_df(pd.read_excel(site10_file))
-        site_son_col = st.selectbox("SON Column (10AM)", site_df.columns)
+        site_engineer_col = st.selectbox("Engineer Column (10AM)", site_df.columns)
+        site_flag_col = st.selectbox("10AM Flag Column (0/1)", site_df.columns)
     else:
         site_df = None
 
@@ -111,12 +110,12 @@ if total_file and efsr_file:
     # ---------------------------
     if st.button("🚀 Generate Report"):
 
-        # Normalize
+        # Normalize SON
         total_df[total_son_col] = total_df[total_son_col].astype(str).str.strip()
         efsr_df[efsr_son_col] = efsr_df[efsr_son_col].astype(str).str.strip()
 
         # ---------------------------
-        # ✅ EFSR LOOKUP (CORRECT)
+        # EFSR LOOKUP
         # ---------------------------
         efsr_lookup = efsr_df[[efsr_son_col, efsr_value_col]].drop_duplicates(subset=efsr_son_col)
 
@@ -128,25 +127,6 @@ if total_file and efsr_file:
         )
 
         merged_df["EFSR"] = merged_df[efsr_value_col].fillna(0)
-
-        # ---------------------------
-        # 10AM COUNT
-        # ---------------------------
-        if site_df is not None:
-            site_df[site_son_col] = site_df[site_son_col].astype(str).str.strip()
-
-            site_count = site_df.groupby(site_son_col).size().reset_index(name="SITE_10AM")
-
-            merged_df = merged_df.merge(
-                site_count,
-                left_on=total_son_col,
-                right_on=site_son_col,
-                how="left"
-            )
-
-            merged_df["SITE_10AM"] = merged_df["SITE_10AM"].fillna(0)
-        else:
-            merged_df["SITE_10AM"] = 0
 
         # ---------------------------
         # FSL COUNT
@@ -168,23 +148,50 @@ if total_file and efsr_file:
             merged_df["E_LEAD"] = 0
 
         # ---------------------------
-        # SUMMARY
+        # SUMMARY (ENGINEER LEVEL)
         # ---------------------------
         summary = merged_df.groupby(engineer_col).agg({
             total_son_col: "count",
             "EFSR": "sum",
-            "SITE_10AM": "sum",
             "E_LEAD": "sum"
         }).reset_index()
 
         summary.rename(columns={total_son_col: "TOTAL SON"}, inplace=True)
 
-        # Percentages
+        # ---------------------------
+        # 10AM ENGINEER-BASED
+        # ---------------------------
+        if site_df is not None:
+            site_df[site_engineer_col] = site_df[site_engineer_col].astype(str).str.strip().str.upper()
+            site_df[site_flag_col] = pd.to_numeric(site_df[site_flag_col], errors='coerce').fillna(0)
+
+            summary[engineer_col] = summary[engineer_col].astype(str).str.strip().str.upper()
+
+            site_summary = site_df.groupby(site_engineer_col)[site_flag_col].sum().reset_index()
+            site_summary.rename(columns={site_flag_col: "SITE_10AM"}, inplace=True)
+
+            summary = summary.merge(
+                site_summary,
+                left_on=engineer_col,
+                right_on=site_engineer_col,
+                how="left"
+            )
+
+            summary["SITE_10AM"] = summary["SITE_10AM"].fillna(0)
+
+        else:
+            summary["SITE_10AM"] = 0
+
+        # ---------------------------
+        # PERCENTAGES
+        # ---------------------------
         summary["EFSR %"] = (summary["EFSR"] / summary["TOTAL SON"]) * 100
         summary["SITE 10AM %"] = (summary["SITE_10AM"] / summary["TOTAL SON"]) * 100
         summary["E-LEAD %"] = (summary["E_LEAD"] / summary["TOTAL SON"]) * 100
 
-        # Ratings
+        # ---------------------------
+        # RATINGS
+        # ---------------------------
         def rating(x):
             if x >= 90:
                 return 5
@@ -205,10 +212,11 @@ if total_file and efsr_file:
             summary["E-LEAD Rating"]
         ) / 3
 
-        # Attendance
+        # ---------------------------
+        # ATTENDANCE
+        # ---------------------------
         if att_df is not None:
-            att_df[att_emp_col] = att_df[att_emp_col].astype(str).str.strip()
-            summary[engineer_col] = summary[engineer_col].astype(str).str.strip()
+            att_df[att_emp_col] = att_df[att_emp_col].astype(str).str.strip().str.upper()
 
             summary = summary.merge(
                 att_df[[att_emp_col, att_days_col]],
@@ -221,7 +229,9 @@ if total_file and efsr_file:
         else:
             summary["ATTENDANCE"] = 0
 
+        # ---------------------------
         # DISPLAY
+        # ---------------------------
         st.subheader("📋 Final Report")
         st.dataframe(summary, use_container_width=True)
 
