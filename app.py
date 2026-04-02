@@ -5,19 +5,20 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 import tempfile
 
-st.set_page_config(page_title="KRA Tracker", layout="wide")
-st.title("📊 Engineer KRA Tracker")
+st.set_page_config(page_title="KRA Dashboard", layout="wide")
 
 # ---------------------------
-# FILE UPLOAD
+# SESSION STATE
 # ---------------------------
-st.sidebar.header("Upload Files")
+if "summary" not in st.session_state:
+    st.session_state.summary = None
 
-total_file = st.sidebar.file_uploader("Total SON", type=["xlsx"])
-efsr_file = st.sidebar.file_uploader("EFSR", type=["xlsx"])
-site10_file = st.sidebar.file_uploader("10AM", type=["xlsx"])
-fsl_file = st.sidebar.file_uploader("FSL (E-Lead)", type=["xlsx"])
-attendance_file = st.sidebar.file_uploader("Attendance", type=["xlsx"])
+# ---------------------------
+# SIDEBAR NAVIGATION
+# ---------------------------
+st.sidebar.title("📊 KRA Dashboard")
+
+page = st.sidebar.radio("Navigate", ["Upload Data", "Dashboard", "Engineer Report"])
 
 # ---------------------------
 # CLEAN FUNCTION
@@ -27,239 +28,192 @@ def clean_df(df):
     return df
 
 # ---------------------------
-# PDF GENERATOR
+# PDF FUNCTION
 # ---------------------------
-def generate_pdf(engineer, emp_code, df):
+def generate_pdf(engineer, df):
     file_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
     doc = SimpleDocTemplate(file_path)
     styles = getSampleStyleSheet()
 
     elements = []
 
-    elements.append(Paragraph(f"<b>Employee Code:</b> {emp_code}", styles["Normal"]))
-    elements.append(Paragraph(f"<b>Engineer Name:</b> {engineer}", styles["Normal"]))
-    elements.append(Paragraph("<b>Monthly KRA Report</b>", styles["Title"]))
-    elements.append(Spacer(1, 10))
-
-    elements.append(Paragraph("Site@10AM: 30% | E-Lead: 40% | Productivity: 30%", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Engineer:</b> {engineer}", styles["Normal"]))
+    elements.append(Paragraph("<b>KRA Report</b>", styles["Title"]))
     elements.append(Spacer(1, 10))
 
     data = [df.columns.tolist()] + df.values.tolist()
 
-    table = Table(data, repeatRows=1)
+    table = Table(data)
     table.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.grey),
-        ("TEXTCOLOR",(0,0),(-1,0),colors.white),
         ("GRID", (0,0), (-1,-1), 0.5, colors.black),
-        ("FONTSIZE", (0,0), (-1,-1), 8)
+        ("BACKGROUND", (0,0), (-1,0), colors.grey),
     ]))
 
     elements.append(table)
-    elements.append(Spacer(1, 20))
-
-    elements.append(Paragraph("Employee Signature: ____________", styles["Normal"]))
-    elements.append(Paragraph("Manager Signature: ____________", styles["Normal"]))
-    elements.append(Paragraph("Remarks:", styles["Normal"]))
 
     doc.build(elements)
     return file_path
 
 # ---------------------------
-# MAIN LOGIC
+# PAGE 1: UPLOAD
 # ---------------------------
-if total_file and efsr_file:
+if page == "Upload Data":
 
-    total_df = clean_df(pd.read_excel(total_file))
-    efsr_df = clean_df(pd.read_excel(efsr_file))
+    st.title("📂 Upload Data")
 
-    st.subheader("🔧 Column Mapping")
+    total_file = st.file_uploader("Total SON", type=["xlsx"])
+    efsr_file = st.file_uploader("EFSR", type=["xlsx"])
+    site10_file = st.file_uploader("10AM", type=["xlsx"])
+    fsl_file = st.file_uploader("FSL", type=["xlsx"])
+    attendance_file = st.file_uploader("Attendance", type=["xlsx"])
 
-    col1, col2 = st.columns(2)
+    if total_file and efsr_file:
 
-    with col1:
-        total_son_col = st.selectbox("SON Column (Total)", total_df.columns)
-        engineer_col = st.selectbox("Engineer Column", total_df.columns)
+        total_df = clean_df(pd.read_excel(total_file))
+        efsr_df = clean_df(pd.read_excel(efsr_file))
 
-    with col2:
-        efsr_son_col = st.selectbox("SON Column (EFSR)", efsr_df.columns)
-        efsr_value_col = st.selectbox("EFSR Value Column", efsr_df.columns)
+        st.subheader("Column Mapping")
 
-    # Optional files
-    if site10_file:
-        site_df = clean_df(pd.read_excel(site10_file))
-        site_engineer_col = st.selectbox("Engineer Column (10AM)", site_df.columns)
-        site_flag_col = st.selectbox("10AM Flag Column (0/1)", site_df.columns)
-    else:
-        site_df = None
+        col1, col2 = st.columns(2)
 
-    if fsl_file:
-        fsl_df = clean_df(pd.read_excel(fsl_file))
-        fsl_son_col = st.selectbox("SON Column (FSL)", fsl_df.columns)
-    else:
-        fsl_df = None
+        with col1:
+            total_son_col = st.selectbox("SON Column", total_df.columns)
+            engineer_col = st.selectbox("Engineer Column", total_df.columns)
 
-    if attendance_file:
-        att_df = clean_df(pd.read_excel(attendance_file))
-        att_emp_col = st.selectbox("Attendance Employee Column", att_df.columns)
-        att_days_col = st.selectbox("Attendance Days Column", att_df.columns)
-    else:
-        att_df = None
+        with col2:
+            efsr_son_col = st.selectbox("EFSR SON", efsr_df.columns)
+            efsr_value_col = st.selectbox("EFSR Value", efsr_df.columns)
 
-    # ---------------------------
-    # PROCESS
-    # ---------------------------
-    if st.button("🚀 Generate Report"):
+        if st.button("Process Data"):
 
-        # Normalize SON
-        total_df[total_son_col] = total_df[total_son_col].astype(str).str.strip()
-        efsr_df[efsr_son_col] = efsr_df[efsr_son_col].astype(str).str.strip()
+            total_df[total_son_col] = total_df[total_son_col].astype(str)
+            efsr_df[efsr_son_col] = efsr_df[efsr_son_col].astype(str)
 
-        # ---------------------------
-        # EFSR LOOKUP
-        # ---------------------------
-        efsr_lookup = efsr_df[[efsr_son_col, efsr_value_col]].drop_duplicates(subset=efsr_son_col)
+            # EFSR lookup
+            efsr_lookup = efsr_df[[efsr_son_col, efsr_value_col]].drop_duplicates()
 
-        merged_df = total_df.merge(
-            efsr_lookup,
-            left_on=total_son_col,
-            right_on=efsr_son_col,
-            how="left"
-        )
-
-        merged_df["EFSR"] = merged_df[efsr_value_col].fillna(0)
-
-        # ---------------------------
-        # FSL COUNT
-        # ---------------------------
-        if fsl_df is not None:
-            fsl_df[fsl_son_col] = fsl_df[fsl_son_col].astype(str).str.strip()
-
-            fsl_count = fsl_df.groupby(fsl_son_col).size().reset_index(name="E_LEAD")
-
-            merged_df = merged_df.merge(
-                fsl_count,
+            merged = total_df.merge(
+                efsr_lookup,
                 left_on=total_son_col,
-                right_on=fsl_son_col,
+                right_on=efsr_son_col,
                 how="left"
             )
 
-            merged_df["E_LEAD"] = merged_df["E_LEAD"].fillna(0)
-        else:
-            merged_df["E_LEAD"] = 0
+            merged["EFSR"] = merged[efsr_value_col].fillna(0)
 
-        # ---------------------------
-        # SUMMARY (ENGINEER LEVEL)
-        # ---------------------------
-        summary = merged_df.groupby(engineer_col).agg({
-            total_son_col: "count",
-            "EFSR": "sum",
-            "E_LEAD": "sum"
-        }).reset_index()
+            # FSL
+            if fsl_file:
+                fsl_df = clean_df(pd.read_excel(fsl_file))
+                fsl_son_col = st.selectbox("FSL SON", fsl_df.columns)
 
-        summary.rename(columns={total_son_col: "TOTAL SON"}, inplace=True)
+                fsl_df[fsl_son_col] = fsl_df[fsl_son_col].astype(str)
 
-        # ---------------------------
-        # 10AM ENGINEER-BASED
-        # ---------------------------
-        if site_df is not None:
-            site_df[site_engineer_col] = site_df[site_engineer_col].astype(str).str.strip().str.upper()
-            site_df[site_flag_col] = pd.to_numeric(site_df[site_flag_col], errors='coerce').fillna(0)
+                fsl_count = fsl_df.groupby(fsl_son_col).size().reset_index(name="E_LEAD")
 
-            summary[engineer_col] = summary[engineer_col].astype(str).str.strip().str.upper()
+                merged = merged.merge(
+                    fsl_count,
+                    left_on=total_son_col,
+                    right_on=fsl_son_col,
+                    how="left"
+                )
 
-            site_summary = site_df.groupby(site_engineer_col)[site_flag_col].sum().reset_index()
-            site_summary.rename(columns={site_flag_col: "SITE_10AM"}, inplace=True)
-
-            summary = summary.merge(
-                site_summary,
-                left_on=engineer_col,
-                right_on=site_engineer_col,
-                how="left"
-            )
-
-            summary["SITE_10AM"] = summary["SITE_10AM"].fillna(0)
-
-        else:
-            summary["SITE_10AM"] = 0
-
-        # ---------------------------
-        # PERCENTAGES
-        # ---------------------------
-        summary["EFSR %"] = (summary["EFSR"] / summary["TOTAL SON"]) * 100
-        summary["SITE 10AM %"] = (summary["SITE_10AM"] / summary["TOTAL SON"]) * 100
-        summary["E-LEAD %"] = (summary["E_LEAD"] / summary["TOTAL SON"]) * 100
-
-        # ---------------------------
-        # RATINGS
-        # ---------------------------
-        def rating(x):
-            if x >= 90:
-                return 5
-            elif x >= 75:
-                return 4
-            elif x >= 50:
-                return 3
+                merged["E_LEAD"] = merged["E_LEAD"].fillna(0)
             else:
-                return 1
+                merged["E_LEAD"] = 0
 
-        summary["EFSR Rating"] = summary["EFSR %"].apply(rating)
-        summary["10AM Rating"] = summary["SITE 10AM %"].apply(rating)
-        summary["E-LEAD Rating"] = summary["E-LEAD %"].apply(rating)
+            # SUMMARY
+            summary = merged.groupby(engineer_col).agg({
+                total_son_col: "count",
+                "EFSR": "sum",
+                "E_LEAD": "sum"
+            }).reset_index()
 
-        summary["FINAL RATING"] = (
-            summary["EFSR Rating"] +
-            summary["10AM Rating"] +
-            summary["E-LEAD Rating"]
-        ) / 3
+            summary.rename(columns={total_son_col: "TOTAL SON"}, inplace=True)
 
-        # ---------------------------
-        # ATTENDANCE
-        # ---------------------------
-        if att_df is not None:
-            att_df[att_emp_col] = att_df[att_emp_col].astype(str).str.strip().str.upper()
+            # 10AM (Engineer based)
+            if site10_file:
+                site_df = clean_df(pd.read_excel(site10_file))
 
-            summary = summary.merge(
-                att_df[[att_emp_col, att_days_col]],
-                left_on=engineer_col,
-                right_on=att_emp_col,
-                how="left"
-            )
+                site_engineer_col = st.selectbox("10AM Engineer", site_df.columns)
+                site_flag_col = st.selectbox("10AM Flag", site_df.columns)
 
-            summary.rename(columns={att_days_col: "ATTENDANCE"}, inplace=True)
-        else:
-            summary["ATTENDANCE"] = 0
+                site_df[site_flag_col] = pd.to_numeric(site_df[site_flag_col], errors="coerce").fillna(0)
 
-        # ---------------------------
-        # DISPLAY
-        # ---------------------------
-        st.subheader("📋 Final Report")
+                site_summary = site_df.groupby(site_engineer_col)[site_flag_col].sum().reset_index()
+
+                summary = summary.merge(
+                    site_summary,
+                    left_on=engineer_col,
+                    right_on=site_engineer_col,
+                    how="left"
+                )
+
+                summary.rename(columns={site_flag_col: "SITE_10AM"}, inplace=True)
+                summary["SITE_10AM"] = summary["SITE_10AM"].fillna(0)
+            else:
+                summary["SITE_10AM"] = 0
+
+            # Percentages
+            summary["EFSR %"] = (summary["EFSR"] / summary["TOTAL SON"]) * 100
+            summary["10AM %"] = (summary["SITE_10AM"] / summary["TOTAL SON"]) * 100
+            summary["E-LEAD %"] = (summary["E_LEAD"] / summary["TOTAL SON"]) * 100
+
+            # Ratings
+            def rating(x):
+                return 5 if x >= 90 else 4 if x >= 75 else 3 if x >= 50 else 1
+
+            summary["FINAL RATING"] = (
+                summary["EFSR %"].apply(rating) +
+                summary["10AM %"].apply(rating) +
+                summary["E-LEAD %"].apply(rating)
+            ) / 3
+
+            st.session_state.summary = summary
+
+            st.success("Data Processed Successfully")
+
+# ---------------------------
+# PAGE 2: DASHBOARD
+# ---------------------------
+elif page == "Dashboard":
+
+    st.title("📈 Dashboard")
+
+    summary = st.session_state.summary
+
+    if summary is None:
+        st.warning("Upload data first")
+    else:
+        col1, col2, col3, col4 = st.columns(4)
+
+        col1.metric("Total Engineers", summary.shape[0])
+        col2.metric("Avg EFSR %", round(summary["EFSR %"].mean(), 2))
+        col3.metric("Avg 10AM %", round(summary["10AM %"].mean(), 2))
+        col4.metric("Avg Rating", round(summary["FINAL RATING"].mean(), 2))
+
         st.dataframe(summary, use_container_width=True)
 
-        # CSV
-        csv = summary.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ Download CSV", csv, "kra_report.csv")
+# ---------------------------
+# PAGE 3: ENGINEER REPORT
+# ---------------------------
+elif page == "Engineer Report":
 
-        # PDF
-        st.subheader("📄 Generate PDF")
+    st.title("👨‍🔧 Engineer Report")
 
-        selected_engineer = st.selectbox("Select Engineer", summary[engineer_col])
+    summary = st.session_state.summary
+
+    if summary is None:
+        st.warning("Upload data first")
+    else:
+        engineer = st.selectbox("Select Engineer", summary.iloc[:, 0])
+
+        emp_df = summary[summary.iloc[:, 0] == engineer]
+
+        st.dataframe(emp_df)
 
         if st.button("Generate PDF"):
 
-            emp_df = summary[summary[engineer_col] == selected_engineer]
-
-            pdf_path = generate_pdf(
-                engineer=selected_engineer,
-                emp_code="AUTO",
-                df=emp_df
-            )
+            pdf_path = generate_pdf(engineer, emp_df)
 
             with open(pdf_path, "rb") as f:
-                st.download_button(
-                    "⬇️ Download PDF",
-                    f,
-                    file_name=f"{selected_engineer}_KRA.pdf"
-                )
-
-else:
-    st.info("Upload Total SON and EFSR to start")
+                st.download_button("Download PDF", f, f"{engineer}.pdf")
