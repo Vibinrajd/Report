@@ -21,39 +21,34 @@ fsl_file = st.sidebar.file_uploader("FSL (E-Lead)", type=["xlsx"])
 attendance_file = st.sidebar.file_uploader("Attendance", type=["xlsx"])
 
 # ---------------------------
-# CLEAN
+# CLEAN FUNCTION
 # ---------------------------
 def clean_df(df):
     df.columns = df.columns.str.strip()
     return df
 
 # ---------------------------
-# PDF GENERATOR
+# PDF FUNCTION
 # ---------------------------
 def generate_pdf(engineer, emp_code, df):
-
     file_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
     doc = SimpleDocTemplate(file_path, pagesize=letter)
     styles = getSampleStyleSheet()
 
     elements = []
 
-    # HEADER
     elements.append(Paragraph(f"<b>Employee Code:</b> {emp_code}", styles["Normal"]))
     elements.append(Paragraph(f"<b>Engineer Name:</b> {engineer}", styles["Normal"]))
     elements.append(Paragraph("<b>Monthly KRA Report</b>", styles["Title"]))
     elements.append(Spacer(1, 10))
 
-    # KPI WEIGHTS
     elements.append(Paragraph("KPI Weights:", styles["Heading3"]))
     elements.append(Paragraph("Site@10AM: 30% | E-Lead: 40% | Productivity: 30%", styles["Normal"]))
     elements.append(Spacer(1, 10))
 
-    # TABLE
     data = [df.columns.tolist()] + df.values.tolist()
 
     table = Table(data, repeatRows=1)
-
     table.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,0), colors.grey),
         ("TEXTCOLOR",(0,0),(-1,0),colors.white),
@@ -64,13 +59,11 @@ def generate_pdf(engineer, emp_code, df):
     elements.append(table)
     elements.append(Spacer(1, 20))
 
-    # FOOTER
     elements.append(Paragraph("Employee Signature: ____________", styles["Normal"]))
     elements.append(Paragraph("Manager Signature: ____________", styles["Normal"]))
     elements.append(Paragraph("Remarks:", styles["Normal"]))
 
     doc.build(elements)
-
     return file_path
 
 # ---------------------------
@@ -91,6 +84,7 @@ if total_file and efsr_file:
 
     with col2:
         efsr_son_col = st.selectbox("SON Column (EFSR)", efsr_df.columns)
+        efsr_value_col = st.selectbox("EFSR Value Column", efsr_df.columns)
 
     # Optional mappings
     if site10_file:
@@ -121,21 +115,26 @@ if total_file and efsr_file:
         total_df[total_son_col] = total_df[total_son_col].astype(str).str.strip()
         efsr_df[efsr_son_col] = efsr_df[efsr_son_col].astype(str).str.strip()
 
-        # EFSR
-        efsr_count = efsr_df.groupby(efsr_son_col).size().reset_index(name="EFSR")
+        # ---------------------------
+        # ✅ EFSR LOOKUP (CORRECT)
+        # ---------------------------
+        efsr_lookup = efsr_df[[efsr_son_col, efsr_value_col]].drop_duplicates(subset=efsr_son_col)
 
         merged_df = total_df.merge(
-            efsr_count,
+            efsr_lookup,
             left_on=total_son_col,
             right_on=efsr_son_col,
             how="left"
         )
 
-        merged_df["EFSR"] = merged_df["EFSR"].fillna(0)
+        merged_df["EFSR"] = merged_df[efsr_value_col].fillna(0)
 
-        # 10AM
+        # ---------------------------
+        # 10AM COUNT
+        # ---------------------------
         if site_df is not None:
             site_df[site_son_col] = site_df[site_son_col].astype(str).str.strip()
+
             site_count = site_df.groupby(site_son_col).size().reset_index(name="SITE_10AM")
 
             merged_df = merged_df.merge(
@@ -144,13 +143,17 @@ if total_file and efsr_file:
                 right_on=site_son_col,
                 how="left"
             )
+
             merged_df["SITE_10AM"] = merged_df["SITE_10AM"].fillna(0)
         else:
             merged_df["SITE_10AM"] = 0
 
-        # FSL
+        # ---------------------------
+        # FSL COUNT
+        # ---------------------------
         if fsl_df is not None:
             fsl_df[fsl_son_col] = fsl_df[fsl_son_col].astype(str).str.strip()
+
             fsl_count = fsl_df.groupby(fsl_son_col).size().reset_index(name="E_LEAD")
 
             merged_df = merged_df.merge(
@@ -159,11 +162,14 @@ if total_file and efsr_file:
                 right_on=fsl_son_col,
                 how="left"
             )
+
             merged_df["E_LEAD"] = merged_df["E_LEAD"].fillna(0)
         else:
             merged_df["E_LEAD"] = 0
 
+        # ---------------------------
         # SUMMARY
+        # ---------------------------
         summary = merged_df.groupby(engineer_col).agg({
             total_son_col: "count",
             "EFSR": "sum",
@@ -173,7 +179,7 @@ if total_file and efsr_file:
 
         summary.rename(columns={total_son_col: "TOTAL SON"}, inplace=True)
 
-        # %
+        # Percentages
         summary["EFSR %"] = (summary["EFSR"] / summary["TOTAL SON"]) * 100
         summary["SITE 10AM %"] = (summary["SITE_10AM"] / summary["TOTAL SON"]) * 100
         summary["E-LEAD %"] = (summary["E_LEAD"] / summary["TOTAL SON"]) * 100
