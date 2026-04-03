@@ -146,7 +146,7 @@ if st.sidebar.button("🚀 Process Data"):
     # SUMMARY (UPDATED)
     # ---------------------------
     summary = merged.groupby(
-        [engineer_col, "MONTH", "WEEK", branch_col]
+        [engineer_col, "MONTH", "MONTH_NUM", "WEEK", branch_col]
     ).agg({
         total_son_col: "count",
         "EFSR": "sum",
