@@ -106,7 +106,7 @@ if st.sidebar.button("🚀 Process Data"):
     # ---------------------------
     # DATE TRANSFORM
     # ---------------------------
-    total_df[service_date_col] = pd.to_datetime(total_df[service_date_col], errors="coerce")
+    total_df[service_date_col] = pd.to_datetime(total_df[service_date_col], errors="coerce", dayfirst=True)
     total_df = total_df.dropna(subset=[service_date_col])
 
     total_df["MONTH"] = total_df[service_date_col].dt.strftime("%b")
