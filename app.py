@@ -155,17 +155,6 @@ if st.sidebar.button("🚀 Process Data"):
     summary.rename(columns={site_flag_col: "SITE_10AM"}, inplace=True)
     summary["SITE_10AM"] = summary["SITE_10AM"].fillna(0)
 
-    # ---------------------------
-    # ATTENDANCE
-    # ---------------------------
-    summary = summary.merge(
-        att_df[[att_emp_col, att_days_col]],
-        left_on=engineer_col,
-        right_on=att_emp_col,
-        how="left"
-    )
-
-    summary.rename(columns={att_days_col: "ATTENDANCE"}, inplace=True)
 
     # ---------------------------
     # KPI CALCULATION
