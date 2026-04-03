@@ -129,11 +129,9 @@ date_range = st.sidebar.date_input("Date Range", [])
 # ---------------------------
 if st.sidebar.button("🚀 Process Data"):
 
-    # Normalize
     total_df[total_son_col] = total_df[total_son_col].astype(str).str.strip()
     efsr_df[efsr_son_col] = efsr_df[efsr_son_col].astype(str).str.strip()
 
-    # DATE
     total_df[service_date_col] = pd.to_datetime(
         total_df[service_date_col],
         errors="coerce",
@@ -142,7 +140,7 @@ if st.sidebar.button("🚀 Process Data"):
 
     total_df = total_df.dropna(subset=[service_date_col])
 
-    # FILTERS (before grouping)
+    # Filters
     if len(date_range) == 2:
         start, end = date_range
         total_df = total_df[
@@ -158,7 +156,7 @@ if st.sidebar.button("🚀 Process Data"):
     if selected_branch:
         total_df = total_df[total_df[branch_col].isin(selected_branch)]
 
-    # DATE FEATURES
+    # Date features
     total_df["MONTH"] = total_df[service_date_col].dt.month_name().str[:3]
     total_df["MONTH_NUM"] = total_df[service_date_col].dt.month
     total_df["WEEK"] = (total_df[service_date_col].dt.day - 1) // 7 + 1
@@ -246,7 +244,17 @@ if page == "Dashboard":
 
         summary = st.session_state.summary
 
-        # Extra filters on summary
+        # 🔥 KPI CARDS
+        c1, c2, c3, c4 = st.columns(4)
+
+        c1.metric("Total Engineers", summary[engineer_col].nunique())
+        c2.metric("Total SON", int(summary["TOTAL SON"].sum()))
+        c3.metric("Avg EFSR %", round(summary["EFSR %"].mean(), 2))
+        c4.metric("Avg Rating", round(summary["FINAL RATING"].mean(), 2))
+
+        st.markdown("---")
+
+        # Filters
         selected_month = st.multiselect("Month", summary["MONTH"].unique())
         selected_week = st.multiselect("Week", summary["WEEK"].unique())
 
