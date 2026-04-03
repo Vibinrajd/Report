@@ -35,6 +35,34 @@ def clean(df):
     return df
 
 # ---------------------------
+# AUTO COLUMN MAPPING
+# ---------------------------
+def auto_map(df, names):
+    for col in df.columns:
+        for n in names:
+            if col.lower().strip() == n.lower().strip():
+                return col
+    return None
+
+DEFAULT = {
+    "total_son": ["SON Number"],
+    "engineer": ["Service Engineer"],
+    "date": ["Service Order Date"],
+    "branch": ["Branch: Branch Name"],
+
+    "efsr_son": ["SON Number"],
+    "efsr_val": ["efsr"],
+
+    "site_eng": ["Service Engineer"],
+    "site_flag": ["Attended Before 10am"],
+
+    "fsl_son": ["Service Order Number"],
+
+    "att_emp": ["Service Engineer"],
+    "att_days": ["Attendance"]
+}
+
+# ---------------------------
 # SESSION INIT
 # ---------------------------
 if "data_loaded" not in st.session_state:
@@ -63,36 +91,29 @@ fsl_df = st.session_state.fsl_df
 att_df = st.session_state.att_df
 
 # ---------------------------
-# SIDEBAR
+# AUTO MAP
+# ---------------------------
+total_son_col = auto_map(total_df, DEFAULT["total_son"])
+engineer_col = auto_map(total_df, DEFAULT["engineer"])
+service_date_col = auto_map(total_df, DEFAULT["date"])
+branch_col = auto_map(total_df, DEFAULT["branch"])
+
+efsr_son_col = auto_map(efsr_df, DEFAULT["efsr_son"])
+efsr_value_col = auto_map(efsr_df, DEFAULT["efsr_val"])
+
+site_engineer_col = auto_map(site_df, DEFAULT["site_eng"])
+site_flag_col = auto_map(site_df, DEFAULT["site_flag"])
+
+fsl_son_col = auto_map(fsl_df, DEFAULT["fsl_son"])
+
+att_emp_col = auto_map(att_df, DEFAULT["att_emp"])
+att_days_col = auto_map(att_df, DEFAULT["att_days"])
+
+# ---------------------------
+# UI
 # ---------------------------
 st.sidebar.title("📊 KRA Dashboard")
-
 page = st.sidebar.radio("Navigate", ["Dashboard", "Engineer Report"])
-
-st.sidebar.header("Column Mapping")
-
-# MAIN
-total_son_col = st.sidebar.selectbox("Total SON Column", total_df.columns)
-engineer_col = st.sidebar.selectbox("Engineer Column", total_df.columns)
-
-# NEW (DATE + BRANCH)
-service_date_col = st.sidebar.selectbox("Service Order Date", total_df.columns)
-branch_col = st.sidebar.selectbox("Branch Column", total_df.columns)
-
-# EFSR
-efsr_son_col = st.sidebar.selectbox("EFSR SON", efsr_df.columns)
-efsr_value_col = st.sidebar.selectbox("EFSR Value", efsr_df.columns)
-
-# 10AM
-site_engineer_col = st.sidebar.selectbox("10AM Engineer", site_df.columns)
-site_flag_col = st.sidebar.selectbox("10AM Flag (0/1)", site_df.columns)
-
-# FSL
-fsl_son_col = st.sidebar.selectbox("FSL SON", fsl_df.columns)
-
-# Attendance
-att_emp_col = st.sidebar.selectbox("Attendance Engineer", att_df.columns)
-att_days_col = st.sidebar.selectbox("Attendance Days", att_df.columns)
 
 # ---------------------------
 # PROCESS
@@ -104,17 +125,22 @@ if st.sidebar.button("🚀 Process Data"):
     efsr_df[efsr_son_col] = efsr_df[efsr_son_col].astype(str).str.strip()
 
     # ---------------------------
-    # DATE TRANSFORM
+    # DATE
     # ---------------------------
-    total_df[service_date_col] = pd.to_datetime(total_df[service_date_col], errors="coerce", dayfirst=True)
+    total_df[service_date_col] = pd.to_datetime(
+        total_df[service_date_col],
+        errors="coerce",
+        dayfirst=True
+    )
+
     total_df = total_df.dropna(subset=[service_date_col])
 
-    total_df["MONTH"] = total_df[service_date_col].dt.strftime("%b")
+    total_df["MONTH"] = total_df[service_date_col].dt.month_name().str[:3]
     total_df["MONTH_NUM"] = total_df[service_date_col].dt.month
     total_df["WEEK"] = (total_df[service_date_col].dt.day - 1) // 7 + 1
 
     # ---------------------------
-    # EFSR LOOKUP
+    # EFSR
     # ---------------------------
     efsr_lookup = efsr_df[[efsr_son_col, efsr_value_col]].drop_duplicates()
 
@@ -131,6 +157,7 @@ if st.sidebar.button("🚀 Process Data"):
     # FSL
     # ---------------------------
     fsl_df[fsl_son_col] = fsl_df[fsl_son_col].astype(str)
+
     fsl_count = fsl_df.groupby(fsl_son_col).size().reset_index(name="E_LEAD")
 
     merged = merged.merge(
@@ -143,7 +170,7 @@ if st.sidebar.button("🚀 Process Data"):
     merged["E_LEAD"] = merged["E_LEAD"].fillna(0)
 
     # ---------------------------
-    # SUMMARY (UPDATED)
+    # SUMMARY
     # ---------------------------
     summary = merged.groupby(
         [engineer_col, "MONTH", "MONTH_NUM", "WEEK", branch_col]
@@ -156,12 +183,12 @@ if st.sidebar.button("🚀 Process Data"):
     summary.rename(columns={total_son_col: "TOTAL SON"}, inplace=True)
 
     # ---------------------------
-    # 10AM (ENGINEER BASED)
+    # 10AM
     # ---------------------------
-    site_df[site_engineer_col] = site_df[site_engineer_col].astype(str).str.strip().str.upper()
+    site_df[site_engineer_col] = site_df[site_engineer_col].astype(str).str.upper()
     site_df[site_flag_col] = pd.to_numeric(site_df[site_flag_col], errors="coerce").fillna(0)
 
-    summary[engineer_col] = summary[engineer_col].astype(str).str.strip().str.upper()
+    summary[engineer_col] = summary[engineer_col].astype(str).str.upper()
 
     site_summary = site_df.groupby(site_engineer_col)[site_flag_col].sum().reset_index()
 
@@ -191,7 +218,6 @@ if st.sidebar.button("🚀 Process Data"):
         summary["E-LEAD %"].apply(rating)
     ) / 3
 
-    # SORT
     summary = summary.sort_values(by=["MONTH_NUM", "WEEK"])
 
     st.session_state.summary = summary
@@ -204,13 +230,9 @@ if page == "Dashboard":
     st.title("📈 KPI Dashboard")
 
     if "summary" in st.session_state:
-
-        summary = st.session_state.summary
-
-        st.dataframe(summary, use_container_width=True)
-
+        st.dataframe(st.session_state.summary, use_container_width=True)
     else:
-        st.warning("Process data first")
+        st.warning("Click Process Data")
 
 # ---------------------------
 # ENGINEER REPORT
@@ -225,9 +247,7 @@ elif page == "Engineer Report":
 
         eng = st.selectbox("Select Engineer", summary[engineer_col])
 
-        emp_df = summary[summary[engineer_col] == eng]
-
-        st.dataframe(emp_df)
+        st.dataframe(summary[summary[engineer_col] == eng])
 
     else:
         st.warning("Process data first")
