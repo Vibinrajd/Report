@@ -10,7 +10,7 @@ st.set_page_config(page_title="KRA Dashboard", layout="wide")
 # ---------------------------
 # GITHUB RAW LINKS
 # ---------------------------
-TOTAL_URL = "https://raw.githubusercontent.com/Vibinrajd/Report/main/data/Total%20SON.xlsx"
+TOTAL_URL = "https://raw.githubusercontent.com/Vibinrajd/Report/blob/main/data/Total%20SONs%202026-2026-04-02-10-01-21.xlsx"
 EFSR_URL = "https://raw.githubusercontent.com/Vibinrajd/Report/main/data/EFSR.xlsx"
 SITE10_URL = "https://raw.githubusercontent.com/Vibinrajd/Report/main/data/10%20AM.xlsx"
 FSL_URL = "https://raw.githubusercontent.com/Vibinrajd/Report/main/data/FSL.xlsx"
