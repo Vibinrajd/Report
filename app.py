@@ -31,6 +31,7 @@ def load_data():
 
 def clean(df):
     df.columns = df.columns.str.strip()
+    df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
     return df
 
 # ---------------------------
@@ -62,40 +63,55 @@ fsl_df = st.session_state.fsl_df
 att_df = st.session_state.att_df
 
 # ---------------------------
-# SIDEBAR NAVIGATION
+# SIDEBAR
 # ---------------------------
 st.sidebar.title("📊 KRA Dashboard")
 
 page = st.sidebar.radio("Navigate", ["Dashboard", "Engineer Report"])
 
-st.sidebar.markdown("---")
 st.sidebar.header("Column Mapping")
 
+# MAIN
+total_son_col = st.sidebar.selectbox("Total SON Column", total_df.columns)
+engineer_col = st.sidebar.selectbox("Engineer Column", total_df.columns)
+
+# NEW (DATE + BRANCH)
+service_date_col = st.sidebar.selectbox("Service Order Date", total_df.columns)
+branch_col = st.sidebar.selectbox("Branch Column", total_df.columns)
+
+# EFSR
+efsr_son_col = st.sidebar.selectbox("EFSR SON", efsr_df.columns)
+efsr_value_col = st.sidebar.selectbox("EFSR Value", efsr_df.columns)
+
+# 10AM
+site_engineer_col = st.sidebar.selectbox("10AM Engineer", site_df.columns)
+site_flag_col = st.sidebar.selectbox("10AM Flag (0/1)", site_df.columns)
+
+# FSL
+fsl_son_col = st.sidebar.selectbox("FSL SON", fsl_df.columns)
+
+# Attendance
+att_emp_col = st.sidebar.selectbox("Attendance Engineer", att_df.columns)
+att_days_col = st.sidebar.selectbox("Attendance Days", att_df.columns)
+
 # ---------------------------
-# COLUMN MAPPING (STABLE)
-# ---------------------------
-total_son_col = st.sidebar.selectbox("Total SON Column", list(total_df.columns))
-engineer_col = st.sidebar.selectbox("Engineer Column", list(total_df.columns))
-
-efsr_son_col = st.sidebar.selectbox("EFSR SON Column", list(efsr_df.columns))
-efsr_value_col = st.sidebar.selectbox("EFSR Value Column", list(efsr_df.columns))
-
-site_engineer_col = st.sidebar.selectbox("10AM Engineer Column", list(site_df.columns))
-site_flag_col = st.sidebar.selectbox("10AM Flag Column (0/1)", list(site_df.columns))
-
-fsl_son_col = st.sidebar.selectbox("FSL SON Column", list(fsl_df.columns))
-
-att_emp_col = st.sidebar.selectbox("Attendance Engineer Column", list(att_df.columns))
-att_days_col = st.sidebar.selectbox("Attendance Days Column", list(att_df.columns))
-
-# ---------------------------
-# PROCESS BUTTON
+# PROCESS
 # ---------------------------
 if st.sidebar.button("🚀 Process Data"):
 
     # Normalize
     total_df[total_son_col] = total_df[total_son_col].astype(str).str.strip()
     efsr_df[efsr_son_col] = efsr_df[efsr_son_col].astype(str).str.strip()
+
+    # ---------------------------
+    # DATE TRANSFORM
+    # ---------------------------
+    total_df[service_date_col] = pd.to_datetime(total_df[service_date_col], errors="coerce")
+    total_df = total_df.dropna(subset=[service_date_col])
+
+    total_df["MONTH"] = total_df[service_date_col].dt.strftime("%b")
+    total_df["MONTH_NUM"] = total_df[service_date_col].dt.month
+    total_df["WEEK"] = (total_df[service_date_col].dt.day - 1) // 7 + 1
 
     # ---------------------------
     # EFSR LOOKUP
@@ -112,10 +128,9 @@ if st.sidebar.button("🚀 Process Data"):
     merged["EFSR"] = merged[efsr_value_col].fillna(0)
 
     # ---------------------------
-    # FSL COUNT
+    # FSL
     # ---------------------------
     fsl_df[fsl_son_col] = fsl_df[fsl_son_col].astype(str)
-
     fsl_count = fsl_df.groupby(fsl_son_col).size().reset_index(name="E_LEAD")
 
     merged = merged.merge(
@@ -128,9 +143,11 @@ if st.sidebar.button("🚀 Process Data"):
     merged["E_LEAD"] = merged["E_LEAD"].fillna(0)
 
     # ---------------------------
-    # SUMMARY
+    # SUMMARY (UPDATED)
     # ---------------------------
-    summary = merged.groupby(engineer_col).agg({
+    summary = merged.groupby(
+        [engineer_col, "MONTH", "WEEK", branch_col]
+    ).agg({
         total_son_col: "count",
         "EFSR": "sum",
         "E_LEAD": "sum"
@@ -141,7 +158,10 @@ if st.sidebar.button("🚀 Process Data"):
     # ---------------------------
     # 10AM (ENGINEER BASED)
     # ---------------------------
+    site_df[site_engineer_col] = site_df[site_engineer_col].astype(str).str.strip().str.upper()
     site_df[site_flag_col] = pd.to_numeric(site_df[site_flag_col], errors="coerce").fillna(0)
+
+    summary[engineer_col] = summary[engineer_col].astype(str).str.strip().str.upper()
 
     site_summary = site_df.groupby(site_engineer_col)[site_flag_col].sum().reset_index()
 
@@ -155,9 +175,8 @@ if st.sidebar.button("🚀 Process Data"):
     summary.rename(columns={site_flag_col: "SITE_10AM"}, inplace=True)
     summary["SITE_10AM"] = summary["SITE_10AM"].fillna(0)
 
-
     # ---------------------------
-    # KPI CALCULATION
+    # KPI
     # ---------------------------
     summary["EFSR %"] = (summary["EFSR"] / summary["TOTAL SON"]) * 100
     summary["10AM %"] = (summary["SITE_10AM"] / summary["TOTAL SON"]) * 100
@@ -166,20 +185,19 @@ if st.sidebar.button("🚀 Process Data"):
     def rating(x):
         return 5 if x >= 90 else 4 if x >= 75 else 3 if x >= 50 else 1
 
-    summary["EFSR Rating"] = summary["EFSR %"].apply(rating)
-    summary["10AM Rating"] = summary["10AM %"].apply(rating)
-    summary["E-LEAD Rating"] = summary["E-LEAD %"].apply(rating)
-
     summary["FINAL RATING"] = (
-        summary["EFSR Rating"] +
-        summary["10AM Rating"] +
-        summary["E-LEAD Rating"]
+        summary["EFSR %"].apply(rating) +
+        summary["10AM %"].apply(rating) +
+        summary["E-LEAD %"].apply(rating)
     ) / 3
+
+    # SORT
+    summary = summary.sort_values(by=["MONTH_NUM", "WEEK"])
 
     st.session_state.summary = summary
 
 # ---------------------------
-# PAGE: DASHBOARD
+# DASHBOARD
 # ---------------------------
 if page == "Dashboard":
 
@@ -189,23 +207,13 @@ if page == "Dashboard":
 
         summary = st.session_state.summary
 
-        c1, c2, c3, c4 = st.columns(4)
-
-        c1.metric("Engineers", len(summary))
-        c2.metric("Avg EFSR %", round(summary["EFSR %"].mean(), 2))
-        c3.metric("Avg 10AM %", round(summary["10AM %"].mean(), 2))
-        c4.metric("Avg Rating", round(summary["FINAL RATING"].mean(), 2))
-
         st.dataframe(summary, use_container_width=True)
 
-        csv = summary.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ Download CSV", csv, "kra_report.csv")
-
     else:
-        st.warning("Click 'Process Data' in sidebar")
+        st.warning("Process data first")
 
 # ---------------------------
-# PAGE: ENGINEER REPORT
+# ENGINEER REPORT
 # ---------------------------
 elif page == "Engineer Report":
 
@@ -220,30 +228,6 @@ elif page == "Engineer Report":
         emp_df = summary[summary[engineer_col] == eng]
 
         st.dataframe(emp_df)
-
-        if st.button("Generate PDF"):
-
-            file_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
-            doc = SimpleDocTemplate(file_path)
-            styles = getSampleStyleSheet()
-
-            elements = []
-            elements.append(Paragraph(f"<b>Engineer:</b> {eng}", styles["Normal"]))
-            elements.append(Spacer(1, 10))
-
-            data = [emp_df.columns.tolist()] + emp_df.values.tolist()
-
-            table = Table(data)
-            table.setStyle(TableStyle([
-                ("GRID", (0,0), (-1,-1), 0.5, colors.black),
-                ("BACKGROUND", (0,0), (-1,0), colors.grey),
-            ]))
-
-            elements.append(table)
-            doc.build(elements)
-
-            with open(file_path, "rb") as f:
-                st.download_button("⬇️ Download PDF", f, f"{eng}.pdf")
 
     else:
         st.warning("Process data first")
