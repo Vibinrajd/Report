@@ -21,88 +21,75 @@ ATT_URL = "https://raw.githubusercontent.com/Vibinrajd/Report/main/data/attendan
 # ---------------------------
 @st.cache_data
 def load_data():
-    total_df = pd.read_excel(TOTAL_URL)
-    efsr_df = pd.read_excel(EFSR_URL)
-    site_df = pd.read_excel(SITE10_URL)
-    fsl_df = pd.read_excel(FSL_URL)
-    att_df = pd.read_excel(ATT_URL)
+    return (
+        pd.read_excel(TOTAL_URL),
+        pd.read_excel(EFSR_URL),
+        pd.read_excel(SITE10_URL),
+        pd.read_excel(FSL_URL),
+        pd.read_excel(ATT_URL),
+    )
 
-    return total_df, efsr_df, site_df, fsl_df, att_df
-
-# ---------------------------
-# CLEAN
-# ---------------------------
 def clean(df):
     df.columns = df.columns.str.strip()
     return df
 
 # ---------------------------
-# PDF
+# SESSION INIT
 # ---------------------------
-def generate_pdf(engineer, df):
-    file_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
-    doc = SimpleDocTemplate(file_path)
-    styles = getSampleStyleSheet()
+if "data_loaded" not in st.session_state:
+    try:
+        total_df, efsr_df, site_df, fsl_df, att_df = load_data()
 
-    elements = []
-    elements.append(Paragraph(f"<b>Engineer:</b> {engineer}", styles["Normal"]))
-    elements.append(Paragraph("<b>KRA Report</b>", styles["Title"]))
-    elements.append(Spacer(1, 10))
+        st.session_state.total_df = clean(total_df)
+        st.session_state.efsr_df = clean(efsr_df)
+        st.session_state.site_df = clean(site_df)
+        st.session_state.fsl_df = clean(fsl_df)
+        st.session_state.att_df = clean(att_df)
 
-    data = [df.columns.tolist()] + df.values.tolist()
+        st.session_state.data_loaded = True
 
-    table = Table(data)
-    table.setStyle(TableStyle([
-        ("GRID", (0,0), (-1,-1), 0.5, colors.black),
-        ("BACKGROUND", (0,0), (-1,0), colors.grey),
-    ]))
-
-    elements.append(table)
-    doc.build(elements)
-
-    return file_path
+    except Exception as e:
+        st.error(f"Data load failed: {e}")
+        st.stop()
 
 # ---------------------------
-# MAIN
+# GET DATA
 # ---------------------------
-st.title("📊 KRA Dashboard")
-
-try:
-    total_df, efsr_df, site_df, fsl_df, att_df = load_data()
-
-    total_df = clean(total_df)
-    efsr_df = clean(efsr_df)
-    site_df = clean(site_df)
-    fsl_df = clean(fsl_df)
-    att_df = clean(att_df)
-
-    st.success("Data Loaded from GitHub")
-
-except Exception as e:
-    st.error(f"Error loading data: {e}")
-    st.stop()
+total_df = st.session_state.total_df
+efsr_df = st.session_state.efsr_df
+site_df = st.session_state.site_df
+fsl_df = st.session_state.fsl_df
+att_df = st.session_state.att_df
 
 # ---------------------------
-# COLUMN MAPPING
+# SIDEBAR NAVIGATION
 # ---------------------------
+st.sidebar.title("📊 KRA Dashboard")
+
+page = st.sidebar.radio("Navigate", ["Dashboard", "Engineer Report"])
+
+st.sidebar.markdown("---")
 st.sidebar.header("Column Mapping")
 
-total_son_col = st.sidebar.selectbox("Total SON Column", total_df.columns)
-engineer_col = st.sidebar.selectbox("Engineer Column", total_df.columns)
+# ---------------------------
+# COLUMN MAPPING (STABLE)
+# ---------------------------
+total_son_col = st.sidebar.selectbox("Total SON Column", list(total_df.columns))
+engineer_col = st.sidebar.selectbox("Engineer Column", list(total_df.columns))
 
-efsr_son_col = st.sidebar.selectbox("EFSR SON Column", efsr_df.columns)
-efsr_value_col = st.sidebar.selectbox("EFSR Value Column", efsr_df.columns)
+efsr_son_col = st.sidebar.selectbox("EFSR SON Column", list(efsr_df.columns))
+efsr_value_col = st.sidebar.selectbox("EFSR Value Column", list(efsr_df.columns))
 
-site_engineer_col = st.sidebar.selectbox("10AM Engineer", site_df.columns)
-site_flag_col = st.sidebar.selectbox("10AM Flag (0/1)", site_df.columns)
+site_engineer_col = st.sidebar.selectbox("10AM Engineer Column", list(site_df.columns))
+site_flag_col = st.sidebar.selectbox("10AM Flag Column (0/1)", list(site_df.columns))
 
-fsl_son_col = st.sidebar.selectbox("FSL SON", fsl_df.columns)
+fsl_son_col = st.sidebar.selectbox("FSL SON Column", list(fsl_df.columns))
 
-att_emp_col = st.sidebar.selectbox("Attendance Engineer", att_df.columns)
-att_days_col = st.sidebar.selectbox("Attendance Days", att_df.columns)
+att_emp_col = st.sidebar.selectbox("Attendance Engineer Column", list(att_df.columns))
+att_days_col = st.sidebar.selectbox("Attendance Days Column", list(att_df.columns))
 
 # ---------------------------
-# PROCESS
+# PROCESS BUTTON
 # ---------------------------
 if st.sidebar.button("🚀 Process Data"):
 
@@ -110,7 +97,9 @@ if st.sidebar.button("🚀 Process Data"):
     total_df[total_son_col] = total_df[total_son_col].astype(str).str.strip()
     efsr_df[efsr_son_col] = efsr_df[efsr_son_col].astype(str).str.strip()
 
-    # EFSR lookup
+    # ---------------------------
+    # EFSR LOOKUP
+    # ---------------------------
     efsr_lookup = efsr_df[[efsr_son_col, efsr_value_col]].drop_duplicates()
 
     merged = total_df.merge(
@@ -122,8 +111,11 @@ if st.sidebar.button("🚀 Process Data"):
 
     merged["EFSR"] = merged[efsr_value_col].fillna(0)
 
-    # FSL count
+    # ---------------------------
+    # FSL COUNT
+    # ---------------------------
     fsl_df[fsl_son_col] = fsl_df[fsl_son_col].astype(str)
+
     fsl_count = fsl_df.groupby(fsl_son_col).size().reset_index(name="E_LEAD")
 
     merged = merged.merge(
@@ -135,7 +127,9 @@ if st.sidebar.button("🚀 Process Data"):
 
     merged["E_LEAD"] = merged["E_LEAD"].fillna(0)
 
+    # ---------------------------
     # SUMMARY
+    # ---------------------------
     summary = merged.groupby(engineer_col).agg({
         total_son_col: "count",
         "EFSR": "sum",
@@ -144,7 +138,9 @@ if st.sidebar.button("🚀 Process Data"):
 
     summary.rename(columns={total_son_col: "TOTAL SON"}, inplace=True)
 
-    # 10AM
+    # ---------------------------
+    # 10AM (ENGINEER BASED)
+    # ---------------------------
     site_df[site_flag_col] = pd.to_numeric(site_df[site_flag_col], errors="coerce").fillna(0)
 
     site_summary = site_df.groupby(site_engineer_col)[site_flag_col].sum().reset_index()
@@ -159,7 +155,9 @@ if st.sidebar.button("🚀 Process Data"):
     summary.rename(columns={site_flag_col: "SITE_10AM"}, inplace=True)
     summary["SITE_10AM"] = summary["SITE_10AM"].fillna(0)
 
-    # Attendance
+    # ---------------------------
+    # ATTENDANCE
+    # ---------------------------
     summary = summary.merge(
         att_df[[att_emp_col, att_days_col]],
         left_on=engineer_col,
@@ -169,49 +167,94 @@ if st.sidebar.button("🚀 Process Data"):
 
     summary.rename(columns={att_days_col: "ATTENDANCE"}, inplace=True)
 
-    # Percentages
+    # ---------------------------
+    # KPI CALCULATION
+    # ---------------------------
     summary["EFSR %"] = (summary["EFSR"] / summary["TOTAL SON"]) * 100
     summary["10AM %"] = (summary["SITE_10AM"] / summary["TOTAL SON"]) * 100
     summary["E-LEAD %"] = (summary["E_LEAD"] / summary["TOTAL SON"]) * 100
 
-    # Rating
     def rating(x):
         return 5 if x >= 90 else 4 if x >= 75 else 3 if x >= 50 else 1
 
+    summary["EFSR Rating"] = summary["EFSR %"].apply(rating)
+    summary["10AM Rating"] = summary["10AM %"].apply(rating)
+    summary["E-LEAD Rating"] = summary["E-LEAD %"].apply(rating)
+
     summary["FINAL RATING"] = (
-        summary["EFSR %"].apply(rating) +
-        summary["10AM %"].apply(rating) +
-        summary["E-LEAD %"].apply(rating)
+        summary["EFSR Rating"] +
+        summary["10AM Rating"] +
+        summary["E-LEAD Rating"]
     ) / 3
 
     st.session_state.summary = summary
 
 # ---------------------------
-# DASHBOARD
+# PAGE: DASHBOARD
 # ---------------------------
-if "summary" in st.session_state:
+if page == "Dashboard":
 
-    summary = st.session_state.summary
+    st.title("📈 KPI Dashboard")
 
-    st.subheader("📈 KPI Overview")
+    if "summary" in st.session_state:
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Engineers", len(summary))
-    c2.metric("Avg EFSR %", round(summary["EFSR %"].mean(), 2))
-    c3.metric("Avg 10AM %", round(summary["10AM %"].mean(), 2))
-    c4.metric("Avg Rating", round(summary["FINAL RATING"].mean(), 2))
+        summary = st.session_state.summary
 
-    st.dataframe(summary, use_container_width=True)
+        c1, c2, c3, c4 = st.columns(4)
 
-    # Engineer report
-    st.subheader("👨‍🔧 Engineer Report")
+        c1.metric("Engineers", len(summary))
+        c2.metric("Avg EFSR %", round(summary["EFSR %"].mean(), 2))
+        c3.metric("Avg 10AM %", round(summary["10AM %"].mean(), 2))
+        c4.metric("Avg Rating", round(summary["FINAL RATING"].mean(), 2))
 
-    eng = st.selectbox("Select Engineer", summary[engineer_col])
+        st.dataframe(summary, use_container_width=True)
 
-    emp_df = summary[summary[engineer_col] == eng]
+        csv = summary.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ Download CSV", csv, "kra_report.csv")
 
-    if st.button("Generate PDF"):
-        pdf = generate_pdf(eng, emp_df)
+    else:
+        st.warning("Click 'Process Data' in sidebar")
 
-        with open(pdf, "rb") as f:
-            st.download_button("Download PDF", f, f"{eng}.pdf")
+# ---------------------------
+# PAGE: ENGINEER REPORT
+# ---------------------------
+elif page == "Engineer Report":
+
+    st.title("👨‍🔧 Engineer Report")
+
+    if "summary" in st.session_state:
+
+        summary = st.session_state.summary
+
+        eng = st.selectbox("Select Engineer", summary[engineer_col])
+
+        emp_df = summary[summary[engineer_col] == eng]
+
+        st.dataframe(emp_df)
+
+        if st.button("Generate PDF"):
+
+            file_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
+            doc = SimpleDocTemplate(file_path)
+            styles = getSampleStyleSheet()
+
+            elements = []
+            elements.append(Paragraph(f"<b>Engineer:</b> {eng}", styles["Normal"]))
+            elements.append(Spacer(1, 10))
+
+            data = [emp_df.columns.tolist()] + emp_df.values.tolist()
+
+            table = Table(data)
+            table.setStyle(TableStyle([
+                ("GRID", (0,0), (-1,-1), 0.5, colors.black),
+                ("BACKGROUND", (0,0), (-1,0), colors.grey),
+            ]))
+
+            elements.append(table)
+            doc.build(elements)
+
+            with open(file_path, "rb") as f:
+                st.download_button("⬇️ Download PDF", f, f"{eng}.pdf")
+
+    else:
+        st.warning("Process data first")
